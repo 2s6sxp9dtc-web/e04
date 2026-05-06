@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>品牌爭奪戰 - 完整互動優化版</title>
+    <title>品牌爭奪戰 - 多人優化版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         * { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
@@ -15,7 +15,7 @@
         .is-target { border: 2.5px dashed #94a3b8 !important; background: #f8fafc; color: #94a3b8; }
         .hand-card { transition: all 0.2s; cursor: pointer; border: 2px solid #e2e8f0; width: 85px; height: 115px; flex-shrink: 0; background: white; border-radius: 10px; position: relative; }
         .hand-card.selected { transform: translateY(-10px); border-color: #6366f1; box-shadow: 0 5px 15px rgba(99,102,241,0.3); }
-        #overlay, #target-modal { z-index: 150; background: #0f172a; color: white; position: fixed; inset: 0; }
+        #overlay, #target-modal, #player-count-view { z-index: 150; background: #0f172a; color: white; position: fixed; inset: 0; }
         .role-badge { font-size: 9px; padding: 1px 6px; border-radius: 99px; margin-left: 4px; font-weight: bold; }
         .badge-good { background: #dcfce7; color: #166534; }
         .badge-bad { background: #fee2e2; color: #991b1b; }
@@ -25,6 +25,18 @@
 <body class="font-sans text-slate-800">
 
     <div id="game-app" class="max-w-md mx-auto h-screen flex flex-col bg-slate-50 relative">
+        
+        <!-- 步驟 0：人數選擇 -->
+        <div id="player-count-view" class="flex flex-col items-center justify-center p-8 text-center">
+            <h2 class="text-2xl font-black mb-2 text-indigo-400 italic">BRAND SABOTEUR</h2>
+            <p class="text-slate-400 mb-8 text-xs tracking-widest uppercase">Select Player Count</p>
+            <div class="w-full space-y-4">
+                <button onclick="selectCount(4)" class="w-full bg-white text-slate-900 py-4 rounded-2xl font-black shadow-lg">4 人遊戲 (3好1壞)</button>
+                <button onclick="selectCount(5)" class="w-full bg-white text-slate-900 py-4 rounded-2xl font-black shadow-lg">5 人遊戲 (3好2壞)</button>
+                <button onclick="selectCount(6)" class="w-full bg-white text-slate-900 py-4 rounded-2xl font-black shadow-lg">6 人遊戲 (4好2壞)</button>
+            </div>
+        </div>
+
         <!-- 目標選擇視窗 -->
         <div id="target-modal" class="hidden flex flex-col items-center justify-center p-8 text-center">
             <h2 id="modal-title" class="text-xl font-black mb-6 text-indigo-400">選擇對象</h2>
@@ -32,7 +44,8 @@
             <button onclick="closeModal()" class="text-slate-400 text-sm underline">取消行動</button>
         </div>
 
-        <div id="overlay" class="flex flex-col items-center justify-center p-6 text-center">
+        <!-- 身分查看與轉場 -->
+        <div id="overlay" class="hidden flex flex-col items-center justify-center p-6 text-center">
             <div id="setup-view" class="w-full">
                 <h2 class="text-xl font-black mb-4 text-indigo-400 italic">BRAND SABOTEUR</h2>
                 <p id="setup-msg" class="mb-6 text-slate-400 text-[10px] font-bold tracking-widest">請第 1 位玩家查看身分</p>
@@ -85,8 +98,8 @@
 
     <script>
         const CARDS_DB = {
-            'road_cross': { name: '十字通路', icon: '╋', type: 'road', ports: [1, 1, 1, 1], desc: '全路口開放。' },
-            'road_t': { name: 'T字通路', icon: '┳', type: 'road', ports: [0, 1, 1, 1], desc: '除上方外皆可通。' },
+            'road_cross': { name: '十字通路', icon: '╋', type: 'road', ports: [1, 1, 1, 1], desc: '四面通達，最有效的擴張卡。' },
+            'road_t': { name: 'T字通路', icon: '┳', type: 'road', ports: [0, 1, 1, 1], desc: '三向分支通路。' },
             'road_corner_rb': { name: '右下通路', icon: '┏', type: 'road', ports: [0, 1, 1, 0], desc: '連接右與下。' },
             'road_corner_lt': { name: '左上通路', icon: '┛', type: 'road', ports: [1, 0, 0, 1], desc: '連接左與上。' },
             'road_corner_lb': { name: '左下通路', icon: '┓', type: 'road', ports: [0, 0, 1, 1], desc: '連接左與下。' },
@@ -94,23 +107,47 @@
             'break': { name: '惡意阻撓', icon: '🛑', type: 'break', desc: '使選定玩家暫停建設。' },
             'fix': { name: '危機公關', icon: '🛠️', type: 'fix', desc: '解除玩家暫停狀態。' },
             'rock': { name: '市場崩盤', icon: '⚒️', type: 'rock', desc: '移除場上一張通路卡。' },
-            'map': { name: '數據市調', icon: '🗺️', type: 'map', desc: '秘密探查目標市場真相。' }
+            'map': { name: '數據市調', icon: '🗺️', type: 'map', desc: '探查目標市場真相。' }
         };
 
         let players = [], deck = [], turn = 0, setupIdx = 0, selectedIdx = null, map = Array(40).fill(null);
-        let actionDone = false, currentRound = 1, goldPos = 0;
+        let actionDone = false, currentRound = 1, goldPos = 0, totalPlayers = 4;
 
-        function init() {
-            for(let i=0; i<4; i++) players.push({ id: i, name: `玩家 ${i+1}`, role: "", hand: [], blocked: false, gold: 0 });
+        // --- 核心修改：選擇人數 ---
+        function selectCount(num) {
+            totalPlayers = num;
+            document.getElementById('player-count-view').classList.add('hidden');
+            document.getElementById('overlay').classList.remove('hidden');
+            initPlayers();
             startNewRound();
         }
 
+        function initPlayers() {
+            players = [];
+            for(let i=0; i<totalPlayers; i++) {
+                players.push({ id: i, name: `玩家 ${i+1}`, role: "", hand: [], blocked: false, gold: 0 });
+            }
+        }
+
         function startNewRound() {
-            let roles = ["壞對手", "好品牌", "好品牌", "好品牌"].sort(() => Math.random() - 0.5);
+            // 角色分配邏輯
+            let roles = [];
+            if(totalPlayers === 4) roles = ["壞對手", "好品牌", "好品牌", "好品牌"];
+            else if(totalPlayers === 5) roles = ["壞對手", "壞對手", "好品牌", "好品牌", "好品牌"];
+            else if(totalPlayers === 6) roles = ["壞對手", "壞對手", "好品牌", "好品牌", "好品牌", "好品牌"];
+            
+            roles = roles.sort(() => Math.random() - 0.5);
             players.forEach((p, i) => { p.role = roles[i]; p.hand = []; p.blocked = false; });
+            
+            // 建立卡池（增加十字路口權重）
             deck = [];
-            const keys = Object.keys(CARDS_DB);
-            for(let i=0; i<80; i++) deck.push(keys[Math.floor(Math.random()*keys.length)]);
+            const normalKeys = Object.keys(CARDS_DB);
+            for(let i=0; i<100; i++) {
+                // 提高十字路口機率 (約 30% 機率抽到)
+                if(Math.random() < 0.3) deck.push('road_cross');
+                else deck.push(normalKeys[Math.floor(Math.random()*normalKeys.length)]);
+            }
+            
             players.forEach(p => { for(let j=0; j<6; j++) p.hand.push(deck.pop()); });
             map = Array(40).fill(null);
             map[2] = { key: 'road_cross', active: true, start: true, ports: [1,1,1,1] };
@@ -122,27 +159,16 @@
 
         function handleMapClick(i) {
             if (selectedIdx === null || actionDone) return;
-            const p = players[turn % 4], k = p.hand[selectedIdx], c = CARDS_DB[k];
-            
+            const p = players[turn % totalPlayers], k = p.hand[selectedIdx], c = CARDS_DB[k];
             if (c.type === 'road') {
                 if (p.blocked) { alert("⚠️ 營運暫停中！需先執行危機公關。"); return; }
                 if (map[i] && !map[i].target) return;
-                
-                // 判定是否符合接口連接
-                if (!checkConnection(i, c.ports)) {
-                    alert("❌ 接口不吻合或未連接主通路！");
-                    return;
-                }
-                
-                // 放置路徑
+                if (!checkConnection(i, c.ports)) { alert("❌ 接口不吻合或未連接主通路！"); return; }
                 if (map[i]?.target) {
-                    // 觸發終點判定
-                    if (i === goldPos) winRound("good", turn % 4);
+                    if (i === goldPos) winRound("good", turn % totalPlayers);
                     else winRound("bad");
                     return; 
-                } else {
-                    map[i] = { key: k, active: true, ports: c.ports };
-                }
+                } else { map[i] = { key: k, active: true, ports: c.ports }; }
             } else if (c.type === 'rock') {
                 if (!map[i] || map[i].start || map[i].target) return;
                 map[i] = null;
@@ -155,27 +181,16 @@
 
         function checkConnection(idx, newPorts) {
             let connectedToActive = false;
-            const neighbors = [
-                { offset: -5, portIdx: 0, oppIdx: 2 },
-                { offset: 1,  portIdx: 1, oppIdx: 3 },
-                { offset: 5,  portIdx: 2, oppIdx: 0 },
-                { offset: -1, portIdx: 3, oppIdx: 1 }
-            ];
-
+            const neighbors = [{ offset: -5, portIdx: 0, oppIdx: 2 }, { offset: 1, portIdx: 1, oppIdx: 3 }, { offset: 5, portIdx: 2, oppIdx: 0 }, { offset: -1, portIdx: 3, oppIdx: 1 }];
             for (const n of neighbors) {
                 const ni = idx + n.offset;
                 if (n.offset === 1 && idx % 5 === 4) continue;
                 if (n.offset === -1 && idx % 5 === 0) continue;
-
                 if (ni >= 0 && ni < 40) {
                     const neighbor = map[ni];
                     if (neighbor && (neighbor.active || neighbor.start || neighbor.target)) {
-                        // 我的接口與鄰居對齊
-                        if (newPorts[n.portIdx] === 1 && neighbor.ports[n.oppIdx] === 1) {
-                            connectedToActive = true;
-                        } else if (newPorts[n.portIdx] !== neighbor.ports[n.oppIdx]) {
-                            return false; // 嚴格接口檢查
-                        }
+                        if (newPorts[n.portIdx] === 1 && neighbor.ports[n.oppIdx] === 1) connectedToActive = true;
+                        else if (newPorts[n.portIdx] !== neighbor.ports[n.oppIdx]) return false;
                     }
                 }
             }
@@ -195,25 +210,20 @@
                     list.appendChild(btn);
                 }
             });
-            if (list.innerHTML === '') list.innerHTML = '<p class="text-slate-400">目前沒有符合條件的玩家</p>';
+            if (list.innerHTML === '') list.innerHTML = '<p class="text-slate-400">目前沒有符合條件的對象</p>';
         }
 
         function closeModal() { document.getElementById('target-modal').classList.add('hidden'); }
 
         function winRound(type, winnerIdx) {
-            if (type === "good") {
-                alert("🎉 好品牌方成功連通市場！恭喜獲勝！");
-                players[winnerIdx].gold += 1;
-            } else {
-                alert("😈 撞到石頭市場！品牌方擴張失敗，壞對手獲勝。");
-                players.filter(p => p.role === "壞對手").forEach(p => p.gold += 1);
-            }
+            if (type === "good") { alert("🎉 好品牌方成功連通市場！恭喜獲勝！"); players[winnerIdx].gold += 1; }
+            else { alert("😈 撞到石頭市場！品牌方擴張失敗，壞對手獲勝。"); players.filter(p => p.role === "壞對手").forEach(p => p.gold += 1); }
             if (currentRound < 3) { currentRound++; startNewRound(); }
-            else { alert("🏆 遊戲結束！恭喜獲勝者。"); location.reload(); }
+            else { alert("🏆 遊戲結束！恭喜最終獲勝者。"); location.reload(); }
         }
 
         function completeAction() {
-            const p = players[turn % 4];
+            const p = players[turn % totalPlayers];
             p.hand.splice(selectedIdx, 1);
             if (deck.length > 0) p.hand.push(deck.pop());
             actionDone = true; selectedIdx = null;
@@ -222,14 +232,11 @@
 
         function revealID() {
             document.getElementById('id-text').innerText = players[setupIdx].role;
-            if (setupIdx < 3) document.getElementById('setup-btn').classList.remove('hidden');
+            if (setupIdx < totalPlayers - 1) document.getElementById('setup-btn').classList.remove('hidden');
             else document.getElementById('start-game-final').classList.remove('hidden');
         }
         function nextID() { setupIdx++; updateSetupUI(); }
         function updateSetupUI() {
-            document.getElementById('overlay').classList.remove('hidden');
-            document.getElementById('setup-view').classList.remove('hidden');
-            document.getElementById('turn-view').classList.add('hidden');
             document.getElementById('id-text').innerText = "點擊翻開";
             document.getElementById('setup-msg').innerText = `請第 ${setupIdx+1} 位玩家查看身分`;
             document.getElementById('setup-btn').classList.add('hidden');
@@ -260,10 +267,10 @@
         function goToNextPlayer() {
             turn++;
             document.getElementById('overlay').classList.remove('hidden');
-            document.getElementById('next-p-name').innerText = players[turn % 4].name;
+            document.getElementById('next-p-name').innerText = players[turn % totalPlayers].name;
         }
         function renderHand() {
-            const el = document.getElementById('hand'), p = players[turn % 4]; el.innerHTML = '';
+            const el = document.getElementById('hand'), p = players[turn % totalPlayers]; el.innerHTML = '';
             p.hand.forEach((k, i) => {
                 const card = CARDS_DB[k], d = document.createElement('div');
                 d.className = `hand-card flex flex-col items-center justify-center p-2 text-center ${selectedIdx === i ? 'selected' : ''}`;
@@ -273,7 +280,7 @@
             });
         }
         function updateUI() {
-            const p = players[turn % 4];
+            const p = players[turn % totalPlayers];
             document.getElementById('curr-p-display').innerText = p.name;
             document.getElementById('curr-p-gold').innerText = p.gold;
             const badge = document.getElementById('curr-p-role-badge');
@@ -294,7 +301,6 @@
             }
         }
         function handleDiscard() { if (selectedIdx !== null && !actionDone) completeAction(); }
-        init();
     </script>
 </body>
 </html>
