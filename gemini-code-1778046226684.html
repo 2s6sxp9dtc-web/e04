@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>品牌爭奪戰 - 完整互動版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        body { -webkit-user-select: none; user-select: none; background-color: #0f172a; }
+        .grid-map { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+        .card-slot { aspect-ratio: 2/3; border: 1.5px solid #cbd5e1; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: #fff; font-size: 18px; position: relative; }
+        .path-active { background: #dcfce7 !important; border-color: #22c55e !important; color: #16a34a; font-weight: bold; }
+        .is-start { border: 3px solid #6366f1 !important; background: #f5f3ff !important; }
+        .is-target { border: 2px dashed #94a3b8 !important; background: #f8fafc; color: #94a3b8; }
+        .hand-card { transition: all 0.2s; cursor: pointer; border: 2px solid #e2e8f0; width: 85px; height: 115px; flex-shrink: 0; background: white; border-radius: 10px; position: relative; }
+        .hand-card.selected { transform: translateY(-10px); border-color: #6366f1; box-shadow: 0 5px 15px rgba(99,102,241,0.3); }
+        #overlay, #target-modal { z-index: 150; background: #0f172a; color: white; position: fixed; inset: 0; }
+        .role-badge { font-size: 9px; padding: 1px 6px; border-radius: 99px; margin-left: 4px; font-weight: bold; }
+        .badge-good { background: #dcfce7; color: #166534; }
+        .badge-bad { background: #fee2e2; color: #991b1b; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="font-sans text-slate-800">
+
+    <div id="game-app" class="max-w-md mx-auto h-screen flex flex-col bg-slate-50 relative">
+        
+        <!-- 目標選擇視窗 -->
+        <div id="target-modal" class="hidden flex flex-col items-center justify-center p-8 text-center">
+            <h2 id="modal-title" class="text-xl font-black mb-6 text-indigo-400">選擇對象</h2>
+            <div id="player-list" class="w-full space-y-4 mb-8"></div>
+            <button onclick="closeModal()" class="text-slate-400 text-sm underline">取消行動</button>
+        </div>
+
+        <div id="overlay" class="flex flex-col items-center justify-center p-6 text-center">
+            <div id="setup-view" class="w-full">
+                <h2 class="text-xl font-black mb-4 text-indigo-400 italic">BRAND SABOTEUR</h2>
+                <p id="setup-msg" class="mb-6 text-slate-400 text-[10px] font-bold tracking-widest">請第 1 位玩家查看身分</p>
+                <div id="id-card" onclick="revealID()" class="w-40 h-56 bg-indigo-600 rounded-2xl flex items-center justify-center cursor-pointer border-4 border-indigo-400 shadow-2xl mb-8 mx-auto">
+                    <span id="id-text" class="font-bold text-lg text-white">點擊翻開</span>
+                </div>
+                <button id="setup-btn" onclick="nextID()" class="hidden w-full bg-white text-slate-900 py-4 rounded-xl font-bold text-sm">我記住了</button>
+                <button id="start-game-final" onclick="startGameNow()" class="hidden w-full bg-green-500 text-white py-4 rounded-xl font-black text-sm">開始遊戲</button>
+            </div>
+            
+            <div id="turn-view" class="hidden w-full">
+                <p class="text-slate-400 mb-2 italic text-xs">移交手機給：</p>
+                <h2 id="next-p-name" class="text-2xl font-black mb-8 text-white">玩家名稱</h2>
+                <button onclick="unlockView()" class="w-full bg-indigo-500 py-4 rounded-2xl font-black text-lg">解鎖手牌</button>
+            </div>
+        </div>
+
+        <header class="bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
+            <h1 class="font-black text-indigo-600 italic text-sm">BRAND SABOTEUR</h1>
+            <div class="text-[9px] font-bold text-slate-400">R: <span id="round-num">1</span>/3</div>
+        </header>
+
+        <main class="flex-1 p-3 overflow-y-auto bg-slate-200">
+            <div id="map" class="grid-map w-full"></div>
+        </main>
+
+        <footer class="bg-white border-t p-3 pb-8">
+            <div class="flex justify-between items-center mb-3">
+                <div class="flex items-center">
+                    <span id="curr-p-display" class="font-black text-slate-800 text-sm">玩家</span>
+                    <span id="curr-p-role-badge" class="role-badge">---</span>
+                    <span id="block-status" class="hidden ml-2 text-[8px] bg-red-500 text-white px-2 py-0.5 rounded-full">營運暫停</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold text-amber-600">💰<span id="curr-p-gold">0</span></span>
+                    <button id="discard-btn" onclick="handleDiscard()" class="text-[9px] bg-slate-100 text-slate-500 px-2 py-1 rounded font-bold border">棄牌</button>
+                </div>
+            </div>
+            <div id="hand" class="flex gap-2 overflow-x-auto pb-3 scrollbar-hide"></div>
+            <div id="action-panel" class="bg-indigo-50 p-3 rounded-xl border border-indigo-200 flex justify-between items-center gap-2">
+                <div class="flex-1">
+                    <p id="info-title" class="font-bold text-indigo-900 text-[11px] mb-0.5">請選取手牌</p>
+                    <p id="info-desc" class="text-[9px] text-slate-600 leading-tight">確認接口正確後點擊地圖。</p>
+                </div>
+                <button id="act-btn" class="bg-slate-300 text-white px-5 py-2.5 rounded-lg font-black text-[10px] pointer-events-none">執行</button>
+                <button id="pass-btn" onclick="goToNextPlayer()" class="hidden bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-black text-[10px] shadow-lg">確認換人</button>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const CARDS_DB = {
+            'road_cross': { name: '十字通路', icon: '╋', type: 'road', ports: [1, 1, 1, 1], desc: '全路口開放。' },
+            'road_t': { name: 'T字通路', icon: '┳', type: 'road', ports: [0, 1, 1, 1], desc: '除上方外皆可通。' },
+            'road_corner_rb': { name: '右下通路', icon: '┏', type: 'road', ports: [0, 1, 1, 0], desc: '連接右與下。' },
+            'road_corner_lt': { name: '左上通路', icon: '┛', type: 'road', ports: [1, 0, 0, 1], desc: '連接左與上。' },
+            'road_corner_lb': { name: '左下通路', icon: '┓', type: 'road', ports: [0, 0, 1, 1], desc: '連接左與下。' },
+            'road_corner_rt': { name: '右上通路', icon: '┗', type: 'road', ports: [1, 1, 0, 0], desc: '連接右與上。' },
+            'break': { name: '惡意阻撓', icon: '🛑', type: 'break', desc: '使一名玩家營運暫停。' },
+            'fix': { name: '危機公關', icon: '🛠️', type: 'fix', desc: '解除玩家暫停狀態。' },
+            'rock': { name: '市場崩盤', icon: '⚒️', type: 'rock', desc: '移除通路。' },
+            'map': { name: '數據市調', icon: '🗺️', type: 'map', desc: '探查市場。' }
+        };
+
+        let players = [], deck = [], turn = 0, setupIdx = 0, selectedIdx = null, map = Array(40).fill(null);
+        let actionDone = false, currentRound = 1, goldPos = 0;
+
+        function init() {
+            for(let i=0; i<4; i++) players.push({ id: i, name: `玩家 ${i+1}`, role: "", hand: [], blocked: false, gold: 0 });
+            startNewRound();
+        }
+
+        function startNewRound() {
+            let roles = ["壞對手", "好品牌", "好品牌", "好品牌"].sort(() => Math.random() - 0.5);
+            players.forEach((p, i) => { p.role = roles[i]; p.hand = []; p.blocked = false; });
+            deck = [];
+            const keys = Object.keys(CARDS_DB);
+            for(let i=0; i<80; i++) deck.push(keys[Math.floor(Math.random()*keys.length)]);
+            players.forEach(p => { for(let j=0; j<6; j++) p.hand.push(deck.pop()); });
+            map = Array(40).fill(null);
+            map[2] = { key: 'road_cross', active: true, start: true, ports: [1,1,1,1] };
+            const tgts = [30, 32, 34]; goldPos = tgts[Math.floor(Math.random()*3)];
+            tgts.forEach(t => map[t] = { target: true, isGold: t === goldPos, ports: [1,1,1,1] });
+            setupIdx = 0; turn = 0;
+            updateSetupUI();
+        }
+
+        function handleMapClick(i) {
+            if (selectedIdx === null || actionDone) return;
+            const p = players[turn % 4], k = p.hand[selectedIdx], c = CARDS_DB[k];
+            if (c.type === 'road') {
+                if (p.blocked) { alert("⚠️ 營運暫停中！需先危機公關。"); return; }
+                if (map[i]) return;
+                if (!checkConnection(i, c.ports)) { alert("❌ 接口不吻合或未連接主通路！"); return; }
+                map[i] = { key: k, active: true, ports: c.ports };
+                if (i === goldPos) winRound("good", turn % 4);
+                else if (map[i]?.target && i !== goldPos) winRound("bad");
+            } else if (c.type === 'rock') {
+                if (!map[i] || map[i].start || map[i].target) return;
+                map[i] = null;
+            } else if (c.type === 'map') {
+                if (!map[i]?.target) return;
+                alert(map[i].isGold ? "💎 真金市場！" : "🪨 石頭市場。");
+            }
+            completeAction();
+        }
+
+        // --- 優化版接口判定：只檢查「有接口」的對接 ---
+        function checkConnection(idx, newPorts) {
+            let connectedToActive = false;
+            const neighbors = [
+                { offset: -5, portIdx: 0, oppIdx: 2 },
+                { offset: 1,  portIdx: 1, oppIdx: 3 },
+                { offset: 5,  portIdx: 2, oppIdx: 0 },
+                { offset: -1, portIdx: 3, oppIdx: 1 }
+            ];
+
+            for (const n of neighbors) {
+                const ni = idx + n.offset;
+                if (n.offset === 1 && idx % 5 === 4) continue;
+                if (n.offset === -1 && idx % 5 === 0) continue;
+
+                if (ni >= 0 && ni < 40) {
+                    const neighbor = map[ni];
+                    if (neighbor && (neighbor.active || neighbor.start || neighbor.target)) {
+                        // 如果我想在那邊開口，鄰居在那邊必須也有開口
+                        if (newPorts[n.portIdx] === 1 && neighbor.ports[n.oppIdx] === 1) {
+                            connectedToActive = true;
+                        } 
+                        // 如果一方有口一邊沒口，視為接口錯誤
+                        else if (newPorts[n.portIdx] !== neighbor.ports[n.oppIdx]) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            return connectedToActive;
+        }
+
+        // --- 行動卡目標選擇邏輯 ---
+        function openTargetModal(type) {
+            const modal = document.getElementById('target-modal');
+            const list = document.getElementById('player-list');
+            const title = document.getElementById('modal-title');
+            list.innerHTML = '';
+            modal.classList.remove('hidden');
+
+            if (type === 'break') {
+                title.innerText = "選擇惡意阻撓對象";
+                players.forEach(p => {
+                    if (!p.blocked) {
+                        const btn = createPlayerBtn(p, () => { p.blocked = true; closeModal(); completeAction(); });
+                        list.appendChild(btn);
+                    }
+                });
+            } else {
+                title.innerText = "選擇危機公關對象";
+                players.forEach(p => {
+                    if (p.blocked) {
+                        const btn = createPlayerBtn(p, () => { p.blocked = false; closeModal(); completeAction(); });
+                        list.appendChild(btn);
+                    }
+                });
+            }
+            if (list.innerHTML === '') list.innerHTML = '<p class="text-slate-500">目前沒有符合條件的對象</p>';
+        }
+
+        function createPlayerBtn(p, callback) {
+            const btn = document.createElement('button');
+            btn.className = "w-full bg-white text-slate-900 py-3 rounded-xl font-bold shadow-md";
+            btn.innerText = p.name;
+            btn.onclick = callback;
+            return btn;
+        }
+
+        function closeModal() { document.getElementById('target-modal').classList.add('hidden'); }
+
+        function completeAction() {
+            const p = players[turn % 4];
+            p.hand.splice(selectedIdx, 1);
+            if (deck.length > 0) p.hand.push(deck.pop());
+            actionDone = true; selectedIdx = null;
+            renderMap(); renderHand(); updateUI();
+        }
+
+        // --- 基礎 UI 與身分分配邏輯 ---
+        function revealID() {
+            document.getElementById('id-text').innerText = players[setupIdx].role;
+            if (setupIdx < 3) document.getElementById('setup-btn').classList.remove('hidden');
+            else document.getElementById('start-game-final').classList.remove('hidden');
+        }
+        function nextID() { setupIdx++; updateSetupUI(); }
+        function updateSetupUI() {
+            document.getElementById('overlay').classList.remove('hidden');
+            document.getElementById('setup-view').classList.remove('hidden');
+            document.getElementById('turn-view').classList.add('hidden');
+            document.getElementById('id-text').innerText = "點擊翻開";
+            document.getElementById('setup-msg').innerText = `請第 ${setupIdx+1} 位玩家查看身分`;
+            document.getElementById('setup-btn').classList.add('hidden');
+            document.getElementById('start-game-final').classList.add('hidden');
+        }
+        function startGameNow() {
+            document.getElementById('setup-view').classList.add('hidden');
+            document.getElementById('turn-view').classList.remove('hidden');
+            document.getElementById('next-p-name').innerText = players[0].name;
+        }
+        function unlockView() {
+            document.getElementById('overlay').classList.add('hidden');
+            actionDone = false; selectedIdx = null;
+            document.getElementById('info-title').innerText = "請選取一張卡牌";
+            document.getElementById('info-desc').innerText = "確認接口正確後點擊地圖。";
+            renderMap(); renderHand(); updateUI();
+        }
+        function renderMap() {
+            const el = document.getElementById('map'); el.innerHTML = '';
+            map.forEach((d, i) => {
+                const s = document.createElement('div');
+                s.className = `card-slot ${d?.active ? 'path-active' : ''} ${d?.start ? 'is-start' : ''} ${d?.target ? 'is-target' : ''}`;
+                s.onclick = () => handleMapClick(i);
+                if(d) s.innerHTML = d.start ? '🏁' : (d.target ? '?' : CARDS_DB[d.key].icon);
+                el.appendChild(s);
+            });
+        }
+        function winRound(type, winnerIdx) {
+            if (type === "good") { alert("🎉 好品牌獲勝！"); players[winnerIdx].gold += 1; }
+            else { alert("😈 撞到石頭！壞對手獲勝。"); players.filter(p => p.role === "壞對手").forEach(p => p.gold += 1); }
+            if (currentRound < 3) { currentRound++; startNewRound(); } else { alert("🏆 遊戲結束！"); location.reload(); }
+        }
+        function goToNextPlayer() {
+            turn++;
+            document.getElementById('overlay').classList.remove('hidden');
+            document.getElementById('next-p-name').innerText = players[turn % 4].name;
+        }
+        function renderHand() {
+            const el = document.getElementById('hand'), p = players[turn % 4];
+            el.innerHTML = '';
+            p.hand.forEach((k, i) => {
+                const card = CARDS_DB[k], d = document.createElement('div');
+                d.className = `hand-card flex flex-col items-center justify-center p-2 text-center ${selectedIdx === i ? 'selected' : ''}`;
+                d.onclick = () => { if(!actionDone) { selectedIdx = i; document.getElementById('info-title').innerText = card.name; document.getElementById('info-desc').innerText = card.desc; renderHand(); updateUI(); } };
+                d.innerHTML = `<div class="text-2xl mb-1">${card.icon}</div><div class="text-[9px] font-black">${card.name}</div>`;
+                el.appendChild(d);
+            });
+        }
+        function updateUI() {
+            const p = players[turn % 4];
+            document.getElementById('curr-p-display').innerText = p.name;
+            document.getElementById('curr-p-gold').innerText = p.gold;
+            const badge = document.getElementById('curr-p-role-badge');
+            badge.innerText = p.role;
+            badge.className = `role-badge ${p.role === '壞對手' ? 'badge-bad' : 'badge-good'}`;
+            const bStatus = document.getElementById('block-status');
+            if (p.blocked) bStatus.classList.remove('hidden'); else bStatus.classList.add('hidden');
+            const actBtn = document.getElementById('act-btn'), passBtn = document.getElementById('pass-btn'), discardBtn = document.getElementById('discard-btn');
+            if (actionDone) {
+                actBtn.classList.add('hidden'); discardBtn.classList.add('hidden'); passBtn.classList.remove('hidden');
+            } else {
+                actBtn.classList.remove('hidden'); discardBtn.classList.remove('hidden'); passBtn.classList.add('hidden');
+                if (selectedIdx !== null) {
+                    const c = CARDS_DB[p.hand[selectedIdx]];
+                    actBtn.className = "bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-black text-[10px]";
+                    actBtn.onclick = () => {
+                        if (c.type === 'break') openTargetModal('break');
+                        else if (c.type === 'fix') openTargetModal('fix');
+                    };
+                } else { actBtn.className = "bg-slate-300 text-white px-5 py-2.5 rounded-lg font-black text-[10px] pointer-events-none"; }
+            }
+        }
+        function handleDiscard() { if (selectedIdx !== null && !actionDone) completeAction(); }
+        init();
+    </script>
+</body>
+</html>
